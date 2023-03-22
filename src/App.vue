@@ -1,18 +1,12 @@
 <template>
-  <img alt="Vue logo" src="./assets/logo.png">
-  <HelloWorld msg="Welcome to Your Vue.js + TypeScript App"/>
+  <div v-if="!webcodecsSupported">Use WebCodecs API supported browsers like Chrome</div>
+  <ScreenShare v-if="webcodecsSupported"/>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
-import HelloWorld from './components/HelloWorld.vue';
+<script setup lang="ts">
+import ScreenShare from "@/components/ScreenShare.vue";
 
-export default defineComponent({
-  name: 'App',
-  components: {
-    HelloWorld
-  }
-});
+const webcodecsSupported = 'VideoEncoder' in window;
 </script>
 
 <style>
