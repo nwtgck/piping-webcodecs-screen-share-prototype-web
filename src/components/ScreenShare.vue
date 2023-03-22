@@ -21,17 +21,10 @@ const path = ref("path1");
 const myCanvas = ref<HTMLCanvasElement>();
 
 async function share() {
-  const stream = await navigator.mediaDevices.getDisplayMedia();
+  const mediaStream = await navigator.mediaDevices.getDisplayMedia();
   let chunkNum = 0;
 
-  const init = {
-    output: handleChunk,
-    error: (e: any) => {
-      console.log(e.message);
-    },
-  };
-
-  const config = {
+  const videoEncoderConfig: VideoEncoderConfig = {
     codec: "vp8",
     width: 640,
     height: 480,
@@ -39,73 +32,76 @@ async function share() {
     framerate: 30,
   };
 
-  const encoder = new VideoEncoder(init);
-  encoder.configure(config);
+  const videoEncoder = new VideoEncoder({
+    output: handleChunk,
+    error: (e: any) => {
+      console.log(e.message);
+    },
+  });
+  videoEncoder.configure(videoEncoderConfig);
 
   let frameCounter = 0;
+  const videoTrack = mediaStream.getVideoTracks()[0];
+  const videoTrackProcessor = new MediaStreamTrackProcessor(videoTrack);
 
-  const track = stream.getVideoTracks()[0];
-  const trackProcessor = new MediaStreamTrackProcessor(track);
-
-  const reader = trackProcessor.readable.getReader();
+  const reader = videoTrackProcessor.readable.getReader();
   while (true) {
     const result = await reader.read();
-    if (result.done) break;
-
+    if (result.done) {
+      break;
+    }
     const frame = result.value;
-    if (encoder.encodeQueueSize > 2) {
+    if (videoEncoder.encodeQueueSize > 2) {
       // Too many frames in flight, encoder is overwhelmed
       // let's drop this frame.
       frame.close();
     } else {
       frameCounter++;
       const keyFrame = frameCounter % 150 == 0;
-      encoder.encode(frame, { keyFrame });
+      videoEncoder.encode(frame, { keyFrame });
       frame.close();
     }
   }
 
-  async function handleChunk(chunk: EncodedVideoChunk, metadata: EncodedVideoChunkMetadata) {
+  async function handleChunk(encodedVideoChunk: EncodedVideoChunk, metadata: EncodedVideoChunkMetadata) {
     chunkNum++;
 
-    const chunkData = new Uint8Array(chunk.byteLength);
-    chunk.copyTo(chunkData);
+    const encodedVideoChunkData = new Uint8Array(encodedVideoChunk.byteLength);
+    encodedVideoChunk.copyTo(encodedVideoChunkData);
 
-    const encoded = cborX.encode({
-      timestamp: chunk.timestamp,
-      type: chunk.type,
-      data: chunkData,
+    const chunk: Uint8Array = cborX.encode({
+      timestamp: encodedVideoChunk.timestamp,
+      type: encodedVideoChunk.type,
+      data: encodedVideoChunkData,
       decoderConfigDescription: metadata.decoderConfig?.description,
     });
 
     fetch(urlJoin(serverUrl.value, path.value, chunkNum.toString()), {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
-      body: encoded,
+      body: chunk,
     });
   }
 }
 
 async function view() {
   const ctx = myCanvas.value!.getContext("2d")!;
-  let pendingFrames: VideoFrame[] = [];
+  const pendingVideoFrames: VideoFrame[] = [];
   let underflow = true;
   let baseTime = 0;
-  let chunkNum = 0;
-  const init = {
-    output: handleFrame,
-    error: (e: any) => {
-      console.log(e.message);
-    },
-  };
 
-  const config = {
+  const videoDecoderConfig: VideoDecoderConfig = {
     codec: "vp8",
     codedWidth: 640,
     codedHeight: 480,
   };
-  const decoder = new VideoDecoder(init);
-  decoder.configure(config);
+  const videoDecoder = new VideoDecoder({
+    output: handleFrame,
+    error: (e: any) => {
+      console.log(e.message);
+    },
+  });
+  videoDecoder.configure(videoDecoderConfig);
 
   for await (const x of downloadVideoChunks()) {
     const chunk = new EncodedVideoChunk({
@@ -113,9 +109,9 @@ async function view() {
       type: x.type,
       data: x.data,
     });
-    decoder.decode(chunk);
+    videoDecoder.decode(chunk);
   }
-  await decoder.flush();
+  await videoDecoder.flush();
 
   async function* downloadVideoChunks() {
     for (let chunkNum = 1; ; chunkNum++) {
@@ -124,8 +120,8 @@ async function view() {
       if (!res.ok) {
         throw new Error(`status is not OK: ${res.status}`);
       }
-      const arr = new Uint8Array(await res.arrayBuffer());
-      const decoded = cborX.decode(arr);
+      const chunk = new Uint8Array(await res.arrayBuffer());
+      const decoded = cborX.decode(chunk);
       yield {
         timestamp: decoded.timestamp,
         type: decoded.type,
@@ -136,30 +132,36 @@ async function view() {
   }
 
   function handleFrame(frame: VideoFrame) {
-    pendingFrames.push(frame);
-    if (underflow) setTimeout(renderFrame, 0);
+    pendingVideoFrames.push(frame);
+    if (underflow) {
+      setTimeout(renderFrame, 0);
+    }
   }
 
-  function calculateTimeUntilNextFrame(timestamp: number) {
-    if (baseTime == 0) baseTime = performance.now();
-    let mediaTime = performance.now() - baseTime;
+  function calculateTimeUntilNextFrame(timestamp: number): number {
+    if (baseTime == 0) {
+      baseTime = performance.now();
+    }
+    const mediaTime = performance.now() - baseTime;
     return Math.max(0, timestamp / 1000 - mediaTime);
   }
 
   async function renderFrame() {
-    underflow = pendingFrames.length == 0;
-    if (underflow) return;
+    underflow = pendingVideoFrames.length == 0;
+    if (underflow) {
+      return;
+    }
 
-    const frame = pendingFrames.shift()!;
+    const videoFrame = pendingVideoFrames.shift()!;
 
     // Based on the frame's timestamp calculate how much of real time waiting
     // is needed before showing the next frame.
-    const timeUntilNextFrame = calculateTimeUntilNextFrame(frame.timestamp);
+    const timeUntilNextFrame = calculateTimeUntilNextFrame(videoFrame.timestamp);
     await new Promise((r) => {
       setTimeout(r, timeUntilNextFrame);
     });
-    ctx.drawImage(frame, 0, 0);
-    frame.close();
+    ctx.drawImage(videoFrame, 0, 0);
+    videoFrame.close();
 
     // Immediately schedule rendering of the next frame
     setTimeout(renderFrame, 0);
