@@ -14,7 +14,8 @@
     "baseUrl": ".",
     "types": [
       "webpack-env",
-      "dom-webcodecs"
+      "dom-webcodecs",
+      "dom-mediacapture-transform"
     ],
     "paths": {
       "@/*": [

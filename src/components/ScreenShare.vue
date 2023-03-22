@@ -9,7 +9,6 @@
 
 <script setup lang="ts">
 // (base: https://developer.chrome.com/articles/webcodecs/)
-declare const MediaStreamTrackProcessor: any;
 
 import {ref} from "vue";
 import urlJoin from "url-join";
@@ -42,7 +41,7 @@ async function share() {
 
   let frameCounter = 0;
   const videoTrack = mediaStream.getVideoTracks()[0];
-  const videoTrackProcessor = new MediaStreamTrackProcessor(videoTrack);
+  const videoTrackProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
 
   const reader = videoTrackProcessor.readable.getReader();
   while (true) {

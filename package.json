@@ -13,6 +13,7 @@
     "vue": "^3.2.13"
   },
   "devDependencies": {
+    "@types/dom-mediacapture-transform": "^0.1.5",
     "@types/dom-webcodecs": "^0.1.6",
     "@types/url-join": "^4.0.1",
     "@vue/cli-plugin-babel": "~5.0.0",
