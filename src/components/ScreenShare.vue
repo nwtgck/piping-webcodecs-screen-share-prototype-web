@@ -13,6 +13,7 @@
 import {ref} from "vue";
 import urlJoin from "url-join";
 import * as cborX from "cbor-x";
+import {AsyncSemaphore} from "@esfx/async-semaphore";
 
 // const serverUrl = ref("http://localhost:8080/screensharetest/");
 const serverUrl = ref("https://localhost:8443/screensharetest/");
@@ -27,7 +28,7 @@ async function share() {
     codec: "vp8",
     width: 640,
     height: 480,
-    bitrate: 2_000_000, // 2 Mbps
+    bitrate: 5_000_000, // 4 Mbps
     framerate: 30,
   };
 
@@ -75,11 +76,18 @@ async function share() {
       decoderConfigDescription: metadata.decoderConfig?.description,
     });
 
-    fetch(urlJoin(serverUrl.value, path.value, chunkNum.toString()), {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: chunk,
-    });
+    try {
+      const res = await fetch(urlJoin(serverUrl.value, path.value, chunkNum.toString()), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: chunk,
+      });
+      if (res.status !== 200) {
+        console.debug(`failed to send chunk #${chunkNum}. status=${res.status}`);
+      }
+    } catch (e) {
+      // Discarding chunk is OK because it is a frame
+    }
   }
 }
 
@@ -88,6 +96,7 @@ async function view() {
   const pendingVideoFrames: VideoFrame[] = [];
   let underflow = true;
   let baseTime = 0;
+  const downloadSemaphore = new AsyncSemaphore(6);
 
   const videoDecoderConfig: VideoDecoderConfig = {
     codec: "vp8",
@@ -102,31 +111,46 @@ async function view() {
   });
   videoDecoder.configure(videoDecoderConfig);
 
-  for await (const x of downloadVideoChunks()) {
-    const chunk = new EncodedVideoChunk({
-      timestamp: x.timestamp,
-      type: x.type,
-      data: x.data,
-    });
-    videoDecoder.decode(chunk);
-  }
+  (async () => {
+    for (let chunkNum = 1; ; chunkNum++) {
+      await downloadSemaphore.wait();
+      downloadVideoChunk(chunkNum).then(chunk => {
+        if (chunk === undefined) {
+          return;
+        }
+        const encodedVideoChunk = new EncodedVideoChunk({
+          timestamp: chunk.timestamp,
+          type: chunk.type,
+          data: chunk.data,
+        });
+        videoDecoder.decode(encodedVideoChunk);
+      }).finally(() => {
+        downloadSemaphore.release();
+      });
+    }
+  })().then();
   await videoDecoder.flush();
 
-  async function* downloadVideoChunks() {
-    for (let chunkNum = 1; ; chunkNum++) {
+  async function downloadVideoChunk(chunkNum: number): Promise<{ timestamp: number, type: "key" | "delta", data: Uint8Array, decoderConfigDescription?: unknown } | undefined> {
+    try {
       const res = await fetch(urlJoin(serverUrl.value, path.value, chunkNum.toString()), {
       });
       if (!res.ok) {
-        throw new Error(`status is not OK: ${res.status}`);
+        console.debug(`failed to receive a chunk #${chunkNum}. status=${res.status}`);
+        // Discard chunk
+        return
       }
       const chunk = new Uint8Array(await res.arrayBuffer());
       const decoded = cborX.decode(chunk);
-      yield {
+      return {
         timestamp: decoded.timestamp,
         type: decoded.type,
         data: decoded.data,
         decoderConfigDescription: decoded.decoderConfigDescription,
       };
+    } catch (e) {
+      console.debug(`failed to receive a chunk #${chunkNum}`, e);
+      // Discard chunk
     }
   }
 
