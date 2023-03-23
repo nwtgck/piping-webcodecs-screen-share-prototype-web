@@ -4,7 +4,7 @@
   <hr>
   <button @click="view()" style="width: 5rem; height: 5rem;">view</button><br>
   <hr>
-  <canvas ref="myCanvas" width="640" height="480"></canvas>
+  <canvas ref="myCanvas" :width="width" :height="height"></canvas>
 </template>
 
 <script setup lang="ts">
@@ -21,14 +21,17 @@ const serverUrl = ref("https://localhost:8443/screensharetest/");
 const path = ref("path1");
 const myCanvas = ref<HTMLCanvasElement>();
 
+const width = 1280;
+const height = 720;
+
 async function share() {
   const mediaStream = await navigator.mediaDevices.getDisplayMedia();
   let chunkNum = 0;
 
   const videoEncoderConfig: VideoEncoderConfig = {
     codec: "vp8",
-    width: 640,
-    height: 480,
+    width: width,
+    height: height,
     bitrate: 5_000_000, // 4 Mbps
     framerate: 30,
   };
@@ -101,8 +104,8 @@ async function view() {
 
   const videoDecoderConfig: VideoDecoderConfig = {
     codec: "vp8",
-    codedWidth: 640,
-    codedHeight: 480,
+    codedWidth: width,
+    codedHeight: height,
   };
   const videoDecoder = new VideoDecoder({
     output: handleFrame,
