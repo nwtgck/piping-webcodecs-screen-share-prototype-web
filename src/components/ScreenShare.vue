@@ -17,6 +17,7 @@ import {AsyncSemaphore} from "@esfx/async-semaphore";
 
 // const serverUrl = ref("http://localhost:8080/screensharetest/");
 const serverUrl = ref("https://localhost:8443/screensharetest/");
+// const serverUrl = ref("https://ppng.io/screensharetest/");
 const path = ref("path1");
 const myCanvas = ref<HTMLCanvasElement>();
 
@@ -40,7 +41,7 @@ async function share() {
   });
   videoEncoder.configure(videoEncoderConfig);
 
-  let frameCounter = 0;
+  let keyFrameDecider = 0;
   const videoTrack = mediaStream.getVideoTracks()[0];
   const videoTrackProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
 
@@ -56,8 +57,8 @@ async function share() {
       // let's drop this frame.
       frame.close();
     } else {
-      frameCounter++;
-      const keyFrame = frameCounter % 150 == 0;
+      const keyFrame = keyFrameDecider === 0;
+      keyFrameDecider = (keyFrameDecider + 1) % 150;
       videoEncoder.encode(frame, { keyFrame });
       frame.close();
     }
